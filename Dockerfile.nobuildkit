@@ -26,8 +26,17 @@ COPY requirements.txt .
 # 先安装 CPU-only 版本的 torch 和 torchaudio（silero-vad 的硬依赖），避免从 PyPI 拉取包含 CUDA 的完整版本（~7GB）
 # 固定至 2.6.0：这是当前已验证与 silero-vad 6.2.x JIT 模型兼容的版本线
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
-RUN pip install --user --no-cache-dir --no-compile "torch==2.6.0" "torchaudio==2.6.0" --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --user --no-cache-dir --no-compile -r requirements.txt
+# Prefer local wheels in ./build-tools/pip-cache/ (filled by build-tools/prefetch.sh);
+# fall back to PyTorch CDN. The COPY is a no-op when the dir is empty.
+COPY build-tools/pip-cache/ /pip-cache/
+
+RUN pip install --user --no-cache-dir --no-compile \
+        --find-links /pip-cache \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        "torch==2.6.0" "torchaudio==2.6.0" \
+    && pip install --user --no-cache-dir --no-compile \
+        --find-links /pip-cache \
+        -r requirements.txt
 
 # 验证 yt-dlp 安装
 RUN /root/.local/bin/yt-dlp --version
@@ -61,6 +70,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
+# Try local cache first (./build-tools/ffmpeg-cache/ffmpeg-<arch>.tar.xz, from prefetch.sh),
+# fall back to network. The COPY is a no-op when the cache dir is empty.
+COPY build-tools/ffmpeg-cache/ /ffmpeg-cache/
+
 RUN set -eux \
     && mkdir -p /ffmpeg-out \
     && arch="${TARGETARCH:-amd64}" \
@@ -81,7 +94,22 @@ RUN set -eux \
             esac ;; \
         *) echo "Unknown FFMPEG_VARIANT: ${FFMPEG_VARIANT}" >&2 && exit 1 ;; \
     esac \
-    && curl -fsSL "$ffmpeg_url" -o "$tmpdir/ffmpeg.tar.xz" \
+    && local_cache="/ffmpeg-cache/ffmpeg-${arch}.tar.xz" \
+    && if [ -s "$local_cache" ]; then \
+            echo "[cache] using $local_cache (skipped network)"; \
+            cp "$local_cache" "$tmpdir/ffmpeg.tar.xz"; \
+        else \
+            echo "[net  ] downloading $ffmpeg_url"; \
+            curl -fsSL \
+                --http1.1 \
+                --retry 5 \
+                --retry-delay 3 \
+                --retry-connrefused \
+                --retry-all-errors \
+                --connect-timeout 30 \
+                --max-time 900 \
+                "$ffmpeg_url" -o "$tmpdir/ffmpeg.tar.xz"; \
+        fi \
     && tar -xf "$tmpdir/ffmpeg.tar.xz" -C "$tmpdir" \
     && payload_dir="$(find "$tmpdir" -mindepth 1 -maxdepth 1 -type d -name 'ffmpeg*' | head -n 1)" \
     && if [ -z "$payload_dir" ]; then echo "Unable to locate extracted ffmpeg directory" >&2 && exit 1; fi \

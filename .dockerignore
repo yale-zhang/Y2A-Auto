@@ -77,7 +77,14 @@ test_*.py
 *_test.py
 tests/
 
-# Development scripts
+# Development scripts (start.* etc.), but the prefetch.sh + cache subdirs are
+# explicitly allowed through so the Dockerfile can COPY them as a build-time
+# fast-path. Run ./build-tools/prefetch.sh on the host to populate them.
 start.bat
 start.ps1
 build-tools/
+!build-tools/ffmpeg-cache/
+!build-tools/ffmpeg-cache/**
+!build-tools/pip-cache/
+!build-tools/pip-cache/**
+!build-tools/prefetch.sh

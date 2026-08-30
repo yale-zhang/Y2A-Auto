@@ -1,11 +1,15 @@
 services:
   y2a-auto:
     container_name: y2a-auto
-    image: fqscfqj/y2a-auto:latest
+    image: y2a-auto:local  # use the locally-built image (also compatible with docker-compose-build.yml)
     # image: ghcr.io/fqscfqj/y2a-auto:latest
     restart: unless-stopped
-    ports:
-      - "5000:5000"
+    # Use host network so the container can reach the macOS host's 127.0.0.1:7892
+    # (TaoCloud / 龙猫云 HTTP proxy). With this, the ports mapping below is
+    # disabled because compose forbids combining network_mode: host with ports:.
+    network_mode: host
+    # ports:
+    #   - "5000:5000"   # disabled while using host network; expose the port directly on the host
     
     # 挂载目录
     volumes:
@@ -20,6 +24,11 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - PYTHONIOENCODING=utf-8
+      # Flask reads PORT env var (default 5000). macOS AirPlay Receiver
+      # binds 5000 host-side; host network mode gives the container the same
+      # network namespace as the host, so we must avoid 5000. 8081 is a
+      # common dev fallback and is currently free on this host.
+      - PORT=8081
 
     # ========================================
     # GPU 硬件编码加速配置（可选）
